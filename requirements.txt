@@ -1,0 +1,9 @@
+streamlit
+numpy
+trimesh
+pubchempy
+ase
+matplotlib
+deep-translator
+scipy
+networkx
