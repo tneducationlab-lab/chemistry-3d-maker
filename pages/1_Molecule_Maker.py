@@ -178,7 +178,7 @@ scale = st.sidebar.slider("サイズ倍率", 5.0, 15.0, 10.0)
 atom_s = 1.0; bond_r = 0.0
 
 if style == "Ball and Stick (球棒)": 
-    bond_r = st.sidebar.slider("結合棒の太さ", 0.01, 0.08, 0.04, step=0.005)
+    bond_r = st.sidebar.slider("結合棒の太さ", 0.05, 0.12, 0.01, step=0.01)
 else: 
     atom_s = st.sidebar.slider("原子の重なり", 0.9, 1.5, 1.1)
 
