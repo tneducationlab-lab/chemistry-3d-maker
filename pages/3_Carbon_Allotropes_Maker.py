@@ -107,43 +107,48 @@ def create_carbon_mesh(atoms, style, scale, atom_s, bond_thickness_ratio, cut_ce
 
     # 結合棒の生成
     if not is_space_filling:
-        cutoff = 1.8 # 炭素-炭素結合距離
+        cutoff = 1.8 # 炭素-炭素結合距離の限界値（これ以上遠いものは結合ではない）
         i_l, j_l, d_l = neighbor_list('ijd', atoms, cutoff=cutoff)
         bond_set = set()
         for i, j in zip(i_l, j_l):
             if i < j: bond_set.add((i, j))
             
         bond_radius = scale * bond_thickness_ratio
+        max_drawn_length = cutoff * scale # 描画を許可する最大の長さ（スケール後）
         
         for i, j in bond_set:
             p1 = positions[i]; p2 = positions[j]
+            vec = p2 - p1
+            ln = np.linalg.norm(vec)
+            
+            # 【重要】周期境界をまたいで端と端をつなぐ「巨大な謎の棒」を除外する安全装置
+            if ln > max_drawn_length or ln < 1e-6:
+                continue
+            
             mid = (p1+p2)/2
             if is_crystal:
                 m = 0.8 * scale
                 if not (-m<=mid[0]<=target_cell[0]+m and -m<=mid[1]<=target_cell[1]+m and -m<=mid[2]<=target_cell[2]+m): continue
                 
-            vec = p2 - p1
-            ln = np.linalg.norm(vec)
-            if ln > 1e-6:
-                cyl = trimesh.creation.cylinder(radius=bond_radius, height=ln, sections=10)
-                ax = np.cross([0,0,1], vec)
-                if np.linalg.norm(ax) < 1e-6:
-                    rot = np.eye(4) if vec[2] > 0 else trimesh.transformations.rotation_matrix(np.pi, [1,0,0])
-                else:
-                    ang = np.arccos(np.dot([0,0,1], vec)/ln)
-                    rot = trimesh.transformations.rotation_matrix(ang, ax)
-                cyl.apply_transform(trimesh.transformations.translation_matrix((p1+p2)/2) @ rot)
+            cyl = trimesh.creation.cylinder(radius=bond_radius, height=ln, sections=10)
+            ax = np.cross([0,0,1], vec)
+            if np.linalg.norm(ax) < 1e-6:
+                rot = np.eye(4) if vec[2] > 0 else trimesh.transformations.rotation_matrix(np.pi, [1,0,0])
+            else:
+                ang = np.arccos(np.dot([0,0,1], vec)/ln)
+                rot = trimesh.transformations.rotation_matrix(ang, ax)
+            cyl.apply_transform(trimesh.transformations.translation_matrix(mid) @ rot)
+            
+            if cut_cell and is_crystal:
+                cyl = safe_slice(cyl, [1,0,0], [0,0,0])
+                cyl = safe_slice(cyl, [-1,0,0], [target_cell[0],0,0])
+                cyl = safe_slice(cyl, [0,1,0], [0,0,0])
+                cyl = safe_slice(cyl, [0,-1,0], [0,target_cell[1],0])
+                cyl = safe_slice(cyl, [0,0,1], [0,0,0])
+                cyl = safe_slice(cyl, [0,0,-1], [0,0,target_cell[2]])
                 
-                if cut_cell and is_crystal:
-                    cyl = safe_slice(cyl, [1,0,0], [0,0,0])
-                    cyl = safe_slice(cyl, [-1,0,0], [target_cell[0],0,0])
-                    cyl = safe_slice(cyl, [0,1,0], [0,0,0])
-                    cyl = safe_slice(cyl, [0,-1,0], [0,target_cell[1],0])
-                    cyl = safe_slice(cyl, [0,0,1], [0,0,0])
-                    cyl = safe_slice(cyl, [0,0,-1], [0,0,target_cell[2]])
-                    
-                if cyl and not cyl.is_empty:
-                    meshes.append(cyl)
+            if cyl and not cyl.is_empty:
+                meshes.append(cyl)
 
     if not meshes: return None
     combined = trimesh.util.concatenate(meshes)
@@ -166,13 +171,11 @@ is_crystal = (sel != "Fullerene (フラーレン C60)")
 
 st.sidebar.header("モデル設定")
 
-# 結晶(ダイヤモンド・黒鉛)の場合のみ、繰り返し数のスライダーを表示
 if is_crystal:
     rep = st.sidebar.slider("繰り返しの数 (XYZ方向)", min_value=1, max_value=5, value=2, help="数を大きくすると壮大な構造になりますが、計算に少し時間がかかります")
 else:
     rep = 1
 
-# モデルデータの取得と繰り返し処理
 if sel == "Diamond (ダイヤモンド)": 
     atoms = bulk('C', 'diamond', a=3.567, cubic=True)
     if rep > 1: atoms = atoms.repeat((rep, rep, rep))
@@ -187,15 +190,16 @@ elif sel == "Fullerene (フラーレン C60)":
 
 style = st.sidebar.selectbox("スタイル", ["Ball and Stick (球棒)", "Space Filling (充填)"])
 scale = st.sidebar.slider("サイズ倍率", 5.0, 15.0, 10.0)
-frame = False; cut = False; atom_s = 1.0; bond_thickness = 0.04
+frame = False; cut = False; atom_s = 1.0
 
+# ★スライダーの範囲とデフォルト値を「折れない太さ」に修正しました
 if style == "Ball and Stick (球棒)":
-    # デフォルトの太さを0.04に変更し、説明文も分かりやすく修正
     bond_thickness = st.sidebar.slider("結合棒の太さ（※枠線は自動でこの半分の細さになります）", min_value=0.05, max_value=0.30, value=0.12, step=0.01)
     if is_crystal:
         frame = st.sidebar.checkbox("単位格子の外枠を表示", value=True)
         cut = st.sidebar.checkbox("枠からはみ出た結合をカット", value=True)
 else:
+    bond_thickness = 0.12
     atom_s = st.sidebar.slider("原子の重なり", 0.9, 1.5, 1.1)
     if is_crystal:
         frame = st.sidebar.checkbox("単位格子の枠を表示", value=False)
