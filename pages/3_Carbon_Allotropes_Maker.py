@@ -2,7 +2,7 @@ import streamlit as st
 import numpy as np
 import trimesh
 from ase import Atoms
-from ase.build import bulk, molecule
+from ase.build import bulk, molecule, nanotube
 from ase.neighborlist import neighbor_list
 from ase.data import vdw_radii, atomic_numbers
 import matplotlib.pyplot as plt
@@ -74,7 +74,6 @@ def create_carbon_mesh(atoms, style, scale, atom_s, bond_thickness_ratio, cut_ce
     
     is_space_filling = (style == "Space Filling (充填)")
 
-    # 原子の生成
     for pos, symbol in zip(positions, symbols):
         if is_crystal:
             margin = 0.1 * scale
@@ -105,23 +104,21 @@ def create_carbon_mesh(atoms, style, scale, atom_s, bond_thickness_ratio, cut_ce
         if sphere and not sphere.is_empty:
             meshes.append(sphere)
 
-    # 結合棒の生成
     if not is_space_filling:
-        cutoff = 1.8 # 炭素-炭素結合距離の限界値（これ以上遠いものは結合ではない）
+        cutoff = 1.8
         i_l, j_l, d_l = neighbor_list('ijd', atoms, cutoff=cutoff)
         bond_set = set()
         for i, j in zip(i_l, j_l):
             if i < j: bond_set.add((i, j))
             
         bond_radius = scale * bond_thickness_ratio
-        max_drawn_length = cutoff * scale # 描画を許可する最大の長さ（スケール後）
+        max_drawn_length = cutoff * scale
         
         for i, j in bond_set:
             p1 = positions[i]; p2 = positions[j]
             vec = p2 - p1
             ln = np.linalg.norm(vec)
             
-            # 【重要】周期境界をまたいで端と端をつなぐ「巨大な謎の棒」を除外する安全装置
             if ln > max_drawn_length or ln < 1e-6:
                 continue
             
@@ -154,7 +151,6 @@ def create_carbon_mesh(atoms, style, scale, atom_s, bond_thickness_ratio, cut_ce
     combined = trimesh.util.concatenate(meshes)
     
     if show_cell_frame and is_crystal:
-        # 枠線は結合棒の「半分の細さ(0.5倍)」にして区別する
         frame_thickness = scale * bond_thickness_ratio * 0.5
         frame = create_lattice_frame(target_cell[0], target_cell[1], target_cell[2], frame_thickness)
         if frame: combined = trimesh.util.concatenate([combined, frame])
@@ -166,13 +162,16 @@ def create_carbon_mesh(atoms, style, scale, atom_s, bond_thickness_ratio, cut_ce
 st.set_page_config(page_title="炭素の同素体メーカー", page_icon="💎", layout="wide")
 st.title("💎 炭素の同素体メーカー")
 
-sel = st.sidebar.selectbox("物質を選ぶ", ["Diamond (ダイヤモンド)", "Graphite (黒鉛)", "Fullerene (フラーレン C60)"])
-is_crystal = (sel != "Fullerene (フラーレン C60)")
+sel = st.sidebar.selectbox("物質を選ぶ", ["Diamond (ダイヤモンド)", "Graphite (黒鉛)", "Fullerene (フラーレン C60)", "Carbon Nanotube (カーボンナノチューブ)"])
+is_crystal = (sel in ["Diamond (ダイヤモンド)", "Graphite (黒鉛)"])
+is_nanotube = (sel == "Carbon Nanotube (カーボンナノチューブ)")
 
 st.sidebar.header("モデル設定")
 
 if is_crystal:
-    rep = st.sidebar.slider("繰り返しの数 (XYZ方向)", min_value=1, max_value=5, value=2, help="数を大きくすると壮大な構造になりますが、計算に少し時間がかかります")
+    rep = st.sidebar.slider("繰り返しの数 (XYZ方向)", min_value=1, max_value=5, value=2, help="数を大きくすると壮大な構造になります")
+elif is_nanotube:
+    rep = st.sidebar.slider("チューブの長さ", min_value=1, max_value=10, value=3, help="ナノチューブの長さを変更します")
 else:
     rep = 1
 
@@ -187,12 +186,15 @@ elif sel == "Graphite (黒鉛)":
 elif sel == "Fullerene (フラーレン C60)": 
     atoms = molecule('C60')
     atoms.center()
+elif sel == "Carbon Nanotube (カーボンナノチューブ)":
+    # アームチェア型 (6,6) のナノチューブを生成
+    atoms = nanotube(6, 6, length=rep)
+    atoms.center()
 
 style = st.sidebar.selectbox("スタイル", ["Ball and Stick (球棒)", "Space Filling (充填)"])
 scale = st.sidebar.slider("サイズ倍率", 5.0, 15.0, 10.0)
 frame = False; cut = False; atom_s = 1.0
 
-# ★スライダーの範囲とデフォルト値を「折れない太さ」に修正しました
 if style == "Ball and Stick (球棒)":
     bond_thickness = st.sidebar.slider("結合棒の太さ（※枠線は自動でこの半分の細さになります）", min_value=0.05, max_value=0.30, value=0.12, step=0.01)
     if is_crystal:
@@ -218,7 +220,7 @@ with c1:
     except: pass
 with c2:
     if st.button("モデル作成 (OBJ形式)", type="primary"):
-        with st.spinner(f"計算中... (繰り返し数 {rep}×{rep}×{rep} は少し時間がかかります)"):
+        with st.spinner(f"計算中... (少し時間がかかります)"):
             mesh = create_carbon_mesh(atoms, style, scale, atom_s, bond_thickness, cut, frame, is_crystal)
             if mesh and not mesh.is_empty:
                 p = "carbon.obj"
